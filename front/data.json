@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "exportedAt": 1777347177250,
+  "accounts": [
+    {
+      "id": "1",
+      "name": "阿里云",
+      "secret": "A3NMLOH23E44Z5RQKG5BTHWPIZOCBBLGAAOLWGIZGYVPN4L4U5WKLTZHN7TRRKSM",
+      "createdAt": 1767698501822
+    },
+    {
+      "id": "2",
+      "name": "海外",
+      "secret": "BNB6KKVHBNRLJAOWWX4VDI6CNFHPLPZZIVNZHA7LYHW3QOVV37XA43CMUJGZCZ4I",
+      "createdAt": 1773382144524
+    }
+  ]
+}
