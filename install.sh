@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# 2FA 后端安装脚本：从 Release zip 下载、按系统选择二进制、安装并启动
+# 密码库后端安装脚本：按系统下载 Release 二进制并启动
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ---------- 可配置 ----------
-RELEASE_ZIP_URL="${RELEASE_ZIP_URL:-https://github.com/AlbertChenshiqi/pass-key-manage/releases/download/1.0.0/2fa-backend-1.0.0.zip}"
+RELEASE_VERSION="${RELEASE_VERSION:-1.0.0}"
+RELEASE_BASE="${RELEASE_BASE:-https://github.com/AlbertChenshiqi/pass-key-manage/releases/download/${RELEASE_VERSION}}"
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/2fa-backend}"
-# 设为 1 强制重新下载 zip（保留 data / .env / logs）
+# 设为 1 强制重新下载二进制（保留 data / .env / logs）
 FORCE_UPDATE="${FORCE_UPDATE:-0}"
-# 开发模式：在仓库 backend/ 内执行时不拉取远端
-REMOTE_INSTALL="${REMOTE_INSTALL:-0}"
 
 DEFAULT_PORT="25100"
 ENV_FILE=".env"
@@ -24,9 +23,6 @@ OS=""
 ARCH=""
 INSTALL_ROOT=""
 SERVER_BIN="bin/server"
-
-GO_VERSION="${GO_VERSION:-1.22.5}"
-GO_INSTALL_DIR="${GO_INSTALL_DIR:-${HOME}/.local/go}"
 
 # ---------- 工具函数 ----------
 need_cmd() {
@@ -54,10 +50,8 @@ detect_platform() {
   case "$raw_arch" in
     x86_64|amd64)  ARCH="amd64" ;;
     aarch64|arm64) ARCH="arm64" ;;
-    armv7l|armv6l) ARCH="arm" ;;
-    i386|i686)     ARCH="386" ;;
     *)
-      echo "错误: 不支持的 CPU 架构: $raw_arch"
+      echo "错误: 不支持的 CPU 架构: $raw_arch（当前仅支持 amd64 / arm64）"
       exit 1
       ;;
   esac
@@ -76,25 +70,17 @@ get_local_ip() {
 }
 
 resolve_install_root() {
-  if [[ -f "$SCRIPT_DIR/go.mod" ]] && [[ "$REMOTE_INSTALL" != "1" ]]; then
-    INSTALL_ROOT="$SCRIPT_DIR"
-    echo ">> 开发模式: 使用本地目录 ${INSTALL_ROOT}"
-    return
-  fi
-  INSTALL_ROOT="$INSTALL_DIR"
+  INSTALL_ROOT="${INSTALL_DIR}"
   echo ">> 安装目录: ${INSTALL_ROOT}"
 }
 
-download_zip() {
+download_file() {
   local url="$1"
   local dest="$2"
   echo ">> 下载: $url"
 
   if command -v curl &>/dev/null; then
-    if curl -fsSL --http1.1 --connect-timeout 30 --retry 3 "$url" -o "$dest"; then
-      return 0
-    fi
-    curl -fsSL --connect-timeout 30 --retry 3 "$url" -o "$dest"
+    curl -fsSL --http1.1 --connect-timeout 30 --retry 3 "$url" -o "$dest"
     return $?
   fi
 
@@ -107,205 +93,61 @@ download_zip() {
   exit 1
 }
 
-ensure_go() {
-  if command -v go &>/dev/null; then
-    echo ">> Go: $(go version)"
-    return 0
-  fi
-
-  if [[ -x "${GO_INSTALL_DIR}/bin/go" ]]; then
-    export GOROOT="${GO_INSTALL_DIR}"
-    export PATH="${GO_INSTALL_DIR}/bin:${PATH}"
-    echo ">> Go: $(go version) (${GO_INSTALL_DIR})"
-    return 0
-  fi
-
-  echo ">> 未找到 Go，正在安装 Go ${GO_VERSION} (${OS}/${ARCH})..."
-  if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
-    echo "错误: 安装 Go 需要 curl 或 wget"
-    exit 1
-  fi
-
-  local tmp_dir archive url extract_parent
-  tmp_dir="$(mktemp -d)"
-  extract_parent="$(dirname "$GO_INSTALL_DIR")"
-  mkdir -p "$extract_parent"
-
+binary_name() {
   if [[ "$OS" == "windows" ]]; then
-    archive="go${GO_VERSION}.windows-${ARCH}.zip"
-    url="https://go.dev/dl/${archive}"
-    echo ">> 下载: $url"
-    if command -v curl &>/dev/null; then
-      curl -fsSL --http1.1 --connect-timeout 60 --retry 3 "$url" -o "${tmp_dir}/${archive}"
-    else
-      wget -qO "${tmp_dir}/${archive}" "$url"
-    fi
-    rm -rf "$GO_INSTALL_DIR"
-    if command -v unzip &>/dev/null; then
-      unzip -q "${tmp_dir}/${archive}" -d "$extract_parent"
-    elif command -v powershell.exe &>/dev/null; then
-      powershell.exe -NoProfile -Command "Expand-Archive -Path '${tmp_dir}/${archive}' -DestinationPath '${extract_parent}' -Force"
-    else
-      echo "错误: Windows 需要 unzip 或 PowerShell 解压 Go"
-      rm -rf "$tmp_dir"
-      exit 1
-    fi
+    echo "server-${OS}-${ARCH}.exe"
   else
-    archive="go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
-    url="https://go.dev/dl/${archive}"
-    echo ">> 下载: $url"
-    if command -v curl &>/dev/null; then
-      curl -fsSL --http1.1 --connect-timeout 60 --retry 3 "$url" -o "${tmp_dir}/${archive}"
-    else
-      wget -qO "${tmp_dir}/${archive}" "$url"
-    fi
-    rm -rf "$GO_INSTALL_DIR"
-    tar -C "$extract_parent" -xzf "${tmp_dir}/${archive}"
+    echo "server-${OS}-${ARCH}"
   fi
-
-  rm -rf "$tmp_dir"
-
-  if [[ ! -x "${GO_INSTALL_DIR}/bin/go" ]]; then
-    echo "错误: Go 安装失败，未找到 ${GO_INSTALL_DIR}/bin/go"
-    exit 1
-  fi
-
-  export GOROOT="${GO_INSTALL_DIR}"
-  export PATH="${GO_INSTALL_DIR}/bin:${PATH}"
-  echo ">> Go 安装完成: $(go version)"
-  echo ">> GOROOT=${GOROOT}"
 }
 
-extract_zip() {
-  local zip_file="$1"
-  local out_dir="$2"
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
+binary_url() {
+  echo "${RELEASE_BASE}/$(binary_name)"
+}
 
-  echo ">> 解压安装包..."
-  if command -v unzip &>/dev/null; then
-    unzip -q "$zip_file" -d "$tmp_dir"
-  elif [[ "$OS" == "windows" ]] && command -v powershell.exe &>/dev/null; then
-    powershell.exe -NoProfile -Command "Expand-Archive -Path '$zip_file' -DestinationPath '$tmp_dir' -Force"
-  else
-    echo "错误: 需要 unzip（Windows 可安装 Git Bash 自带 unzip 或 PowerShell）"
-    rm -rf "$tmp_dir"
-    exit 1
-  fi
-
-  local extracted src_dir=""
-  extracted="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -1)"
-
-  if [[ -f "$extracted/go.mod" ]]; then
-    src_dir="$extracted"
-  elif [[ -f "$extracted/backend/go.mod" ]]; then
-    src_dir="$extracted/backend"
-  else
-    src_dir="$(find "$tmp_dir" -name go.mod -print -quit 2>/dev/null | xargs dirname 2>/dev/null || true)"
-  fi
-
-  if [[ -z "$src_dir" || ! -d "$src_dir" ]]; then
-    echo "错误: zip 中未找到有效安装内容"
-    rm -rf "$tmp_dir"
-    exit 1
-  fi
-
-  # 保留已有配置与数据
-  local keep_data="" keep_env="" keep_logs=""
-  [[ -d "$out_dir/data" ]] && keep_data="$(mktemp -d)" && cp -a "$out_dir/data/." "$keep_data/"
-  [[ -f "$out_dir/.env" ]] && keep_env="$(mktemp)" && cp -a "$out_dir/.env" "$keep_env"
-  [[ -d "$out_dir/logs" ]] && keep_logs="$(mktemp -d)" && cp -a "$out_dir/logs/." "$keep_logs/" 2>/dev/null || true
-
-  mkdir -p "$out_dir"
-  rm -rf "${out_dir:?}/"* 2>/dev/null || true
-  cp -a "$src_dir/." "$out_dir/"
-
-  [[ -n "$keep_data" ]] && mkdir -p "$out_dir/data" && cp -a "$keep_data/." "$out_dir/data/" && rm -rf "$keep_data"
-  [[ -n "$keep_env" ]] && cp -a "$keep_env" "$out_dir/.env" && rm -f "$keep_env"
-  [[ -n "$keep_logs" ]] && mkdir -p "$out_dir/logs" && cp -a "$keep_logs/." "$out_dir/logs/" 2>/dev/null || true && rm -rf "$keep_logs"
-
-  rm -rf "$tmp_dir"
-  echo ">> 已解压到: $out_dir"
+local_binary_path() {
+  echo "bin/$(binary_name)"
 }
 
 should_download() {
   [[ "$FORCE_UPDATE" == "1" ]] && return 0
-  [[ "$INSTALL_ROOT" == "$SCRIPT_DIR" ]] && [[ -f "$SCRIPT_DIR/go.mod" ]] && return 1
-  [[ -f "$INSTALL_ROOT/.env" ]] && [[ -d "$INSTALL_ROOT/bin" ]] && return 1
+  local bin_path
+  bin_path="$(local_binary_path)"
+  [[ -f "$bin_path" ]] && return 1
   return 0
 }
 
-fetch_remote_release() {
-  local tmp_zip
-  if [[ "$OS" == "windows" ]]; then
-    tmp_zip="${TMP:-/tmp}/2fa-backend.$$.$RANDOM.zip"
-  else
-    tmp_zip="$(mktemp /tmp/2fa-backend.XXXXXX.zip)"
-  fi
+fetch_binary() {
+  local url dest
+  url="$(binary_url)"
+  dest="$(local_binary_path)"
 
-  download_zip "$RELEASE_ZIP_URL" "$tmp_zip"
-  extract_zip "$tmp_zip" "$INSTALL_ROOT"
-  rm -f "$tmp_zip"
-}
-
-resolve_server_binary() {
-  local candidates=()
-
-  if [[ "$OS" == "windows" ]]; then
-    candidates+=(
-      "bin/server-${OS}-${ARCH}.exe"
-      "bin/server-${OS}_${ARCH}.exe"
-      "bin/server.exe"
-      "bin/server"
-    )
-  else
-    candidates+=(
-      "bin/server-${OS}-${ARCH}"
-      "bin/server-${OS}_${ARCH}"
-      "bin/server"
-    )
-  fi
-
-  local c
-  for c in "${candidates[@]}"; do
-    if [[ -f "$c" ]]; then
-      if [[ "$OS" != "windows" ]]; then
-        chmod +x "$c" 2>/dev/null || true
-      fi
-      SERVER_BIN="$c"
-      echo ">> 使用二进制: ${SERVER_BIN}"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-build_from_source() {
-  echo ">> 未找到预编译包，尝试源码编译..."
-  ensure_go
-  if [[ ! -f go.mod ]]; then
-    echo "错误: 未找到 go.mod，且 zip 中无当前平台二进制 (${OS}/${ARCH})"
-    exit 1
-  fi
-  go mod tidy
   mkdir -p bin
-  if [[ "$OS" == "windows" ]]; then
-    go build -o "bin/server-${OS}-${ARCH}.exe" .
-    SERVER_BIN="bin/server-${OS}-${ARCH}.exe"
-  else
-    go build -o "bin/server-${OS}-${ARCH}" .
-    SERVER_BIN="bin/server-${OS}-${ARCH}"
-    chmod +x "$SERVER_BIN"
+  download_file "$url" "$dest"
+
+  if [[ "$OS" != "windows" ]]; then
+    chmod +x "$dest"
   fi
-  echo ">> 编译完成: ${SERVER_BIN}"
+
+  SERVER_BIN="$dest"
+  echo ">> 已保存: ${INSTALL_ROOT}/${SERVER_BIN}"
 }
 
 ensure_binary() {
-  if resolve_server_binary; then
+  local bin_path
+  bin_path="$(local_binary_path)"
+
+  if [[ -f "$bin_path" ]]; then
+    if [[ "$OS" != "windows" ]]; then
+      chmod +x "$bin_path" 2>/dev/null || true
+    fi
+    SERVER_BIN="$bin_path"
+    echo ">> 使用二进制: ${SERVER_BIN}"
     return 0
   fi
-  build_from_source
+
+  echo "错误: 未找到二进制 ${bin_path}，请检查下载是否成功"
+  exit 1
 }
 
 load_env() {
@@ -345,8 +187,9 @@ print_info() {
 
   echo ""
   echo "========================================"
-  echo "2FA 后端服务"
+  echo "密码库后端服务"
   echo "========================================"
+  echo "版本:       ${RELEASE_VERSION}"
   echo "系统:       ${OS}/${ARCH}"
   echo "服务器地址: http://${ip}:${PORT}"
   echo "本地访问:   http://127.0.0.1:${PORT}"
@@ -370,7 +213,6 @@ DATA_FILE=./data/data.json
 ACCESS_LOG_FILE=./logs/access.log
 EOF
 
-  ensure_binary
   mkdir -p data
   if [[ ! -f data/data.json ]]; then
     echo '{"version":2,"exportedAt":0,"nextVaultId":1,"accounts":[]}' > data/data.json
@@ -429,12 +271,12 @@ mkdir -p "$LOG_DIR" bin data
 exec > >(tee -a "$INSTALL_LOG") 2>&1
 
 echo ">> [$(date '+%Y-%m-%d %H:%M:%S')] install.sh 开始"
-echo ">> Release: ${RELEASE_ZIP_URL}"
+echo ">> Release: v${RELEASE_VERSION}"
 
 if should_download; then
-  fetch_remote_release
+  fetch_binary
 else
-  echo ">> 已安装，跳过下载（FORCE_UPDATE=1 可强制更新）"
+  echo ">> 已存在二进制，跳过下载（FORCE_UPDATE=1 可强制更新）"
 fi
 
 if is_configured; then
