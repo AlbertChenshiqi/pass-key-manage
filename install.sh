@@ -25,6 +25,9 @@ ARCH=""
 INSTALL_ROOT=""
 SERVER_BIN="bin/server"
 
+GO_VERSION="${GO_VERSION:-1.22.5}"
+GO_INSTALL_DIR="${GO_INSTALL_DIR:-${HOME}/.local/go}"
+
 # ---------- 工具函数 ----------
 need_cmd() {
   if ! command -v "$1" &>/dev/null; then
@@ -102,6 +105,75 @@ download_zip() {
 
   echo "错误: 需要 curl 或 wget"
   exit 1
+}
+
+ensure_go() {
+  if command -v go &>/dev/null; then
+    echo ">> Go: $(go version)"
+    return 0
+  fi
+
+  if [[ -x "${GO_INSTALL_DIR}/bin/go" ]]; then
+    export GOROOT="${GO_INSTALL_DIR}"
+    export PATH="${GO_INSTALL_DIR}/bin:${PATH}"
+    echo ">> Go: $(go version) (${GO_INSTALL_DIR})"
+    return 0
+  fi
+
+  echo ">> 未找到 Go，正在安装 Go ${GO_VERSION} (${OS}/${ARCH})..."
+  if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+    echo "错误: 安装 Go 需要 curl 或 wget"
+    exit 1
+  fi
+
+  local tmp_dir archive url extract_parent
+  tmp_dir="$(mktemp -d)"
+  extract_parent="$(dirname "$GO_INSTALL_DIR")"
+  mkdir -p "$extract_parent"
+
+  if [[ "$OS" == "windows" ]]; then
+    archive="go${GO_VERSION}.windows-${ARCH}.zip"
+    url="https://go.dev/dl/${archive}"
+    echo ">> 下载: $url"
+    if command -v curl &>/dev/null; then
+      curl -fsSL --http1.1 --connect-timeout 60 --retry 3 "$url" -o "${tmp_dir}/${archive}"
+    else
+      wget -qO "${tmp_dir}/${archive}" "$url"
+    fi
+    rm -rf "$GO_INSTALL_DIR"
+    if command -v unzip &>/dev/null; then
+      unzip -q "${tmp_dir}/${archive}" -d "$extract_parent"
+    elif command -v powershell.exe &>/dev/null; then
+      powershell.exe -NoProfile -Command "Expand-Archive -Path '${tmp_dir}/${archive}' -DestinationPath '${extract_parent}' -Force"
+    else
+      echo "错误: Windows 需要 unzip 或 PowerShell 解压 Go"
+      rm -rf "$tmp_dir"
+      exit 1
+    fi
+  else
+    archive="go${GO_VERSION}.${OS}-${ARCH}.tar.gz"
+    url="https://go.dev/dl/${archive}"
+    echo ">> 下载: $url"
+    if command -v curl &>/dev/null; then
+      curl -fsSL --http1.1 --connect-timeout 60 --retry 3 "$url" -o "${tmp_dir}/${archive}"
+    else
+      wget -qO "${tmp_dir}/${archive}" "$url"
+    fi
+    rm -rf "$GO_INSTALL_DIR"
+    tar -C "$extract_parent" -xzf "${tmp_dir}/${archive}"
+  fi
+
+  rm -rf "$tmp_dir"
+
+  if [[ ! -x "${GO_INSTALL_DIR}/bin/go" ]]; then
+    echo "错误: Go 安装失败，未找到 ${GO_INSTALL_DIR}/bin/go"
+    exit 1
+  fi
+
+  export GOROOT="${GO_INSTALL_DIR}"
+  export PATH="${GO_INSTALL_DIR}/bin:${PATH}"
+  echo ">> Go 安装完成: $(go version)"
+  echo ">> GOROOT=${GOROOT}"
 }
 
 extract_zip() {
@@ -211,7 +283,7 @@ resolve_server_binary() {
 
 build_from_source() {
   echo ">> 未找到预编译包，尝试源码编译..."
-  need_cmd go
+  ensure_go
   if [[ ! -f go.mod ]]; then
     echo "错误: 未找到 go.mod，且 zip 中无当前平台二进制 (${OS}/${ARCH})"
     exit 1
