@@ -856,7 +856,7 @@
             user-select: none;
         }
 
-        .switch-row span {
+        .switch-row > span:first-child {
             font-size: 13px;
             font-weight: 500;
             color: var(--text);
@@ -1101,7 +1101,7 @@
                             </button>
                         </div>
                     </div>
-                    <div class="form-section" style="margin-bottom: 14px;">
+                    <div class="form-section auto-sync-section hidden" style="margin-bottom: 14px;" id="autoSyncSection">
                         <label class="switch-row" for="autoSyncInput">
                             <span>自动同步</span>
                             <span class="switch">
@@ -1109,7 +1109,7 @@
                                 <span class="switch-slider"></span>
                             </span>
                         </label>
-                        <p class="form-hint">开启后：新建/编辑/删除自动上传；打开插件时自动拉取并与本地合并</p>
+                        <p class="form-hint auto-sync-hint hidden" id="autoSyncHint">开启后：新建/编辑/删除自动上传；打开插件时自动拉取并与本地合并</p>
                     </div>
                     <div class="btn-row">
                         <button type="button" id="saveUserSettingsBtn" class="btn btn-primary">保存配置</button>

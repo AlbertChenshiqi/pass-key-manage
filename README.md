@@ -1,58 +1,108 @@
 # 密码库
 
-轻量密码管理工具，包含 Chrome 扩展前端与 Go 后端服务。支持 2FA 验证码、登录密码、安全笔记、银行卡、身份信息，并可通过自建服务器备份与同步数据。
+轻量密码管理工具，支持 **Chrome 扩展**、**Android 客户端** 与 **自建后端**，统一管理 2FA 验证码、登录密码、安全笔记、银行卡、身份信息，并通过服务器备份与多端同步。
+
+> Go 后端完整源码见 [pass-key-manage](https://github.com/AlbertChenshiqi/pass-key-manage)。
+
+## 架构概览
+
+```
+┌─────────────┐     ┌─────────────┐
+│  Chrome 扩展 │     │ Android 客户端 │
+│   front/    │     │   android/  │
+└──────┬──────┘     └──────┬──────┘
+       │    REST API       │
+       └────────┬──────────┘
+                ▼
+       ┌─────────────────┐
+       │  后端服务 (Go)   │  ← install.sh 一键安装
+       │  data/data.json │
+       └─────────────────┘
+```
+
+各客户端共用同一套 API 与 `data.json` 数据格式，配置相同的服务器地址与 API Key 即可跨端同步。
 
 ## 功能概览
 
-### 浏览器扩展（`front/`）
+### 支持的记录类型
 
-- **多种记录类型**：2FA（TOTP）、登录密码、安全笔记、银行卡、身份信息
-- **2FA**：扫码 / otpauth 导入、验证码复制、倒计时刷新
-- **密码库**：分类筛选、一键复制、本地存储
-- **本地管理**：导出 / 导入 `data.json`
-- **服务器管理**：
-  - 配置服务器地址与 API Key
-  - 连接状态检测（打开插件时自动检查，后台每 10 分钟巡检）
-  - 手动备份到服务器 / 从服务器合并同步
-  - **自动同步**：开启后，新建 / 编辑 / 删除自动上传；打开插件时自动拉取并与本地合并（不删除仅存在于本地的记录）
+| 类型 | 字段 |
+|------|------|
+| `totp` — 2FA | 名称、密钥 / `otpauth://` 地址 |
+| `login` — 登录密码 | 名称、网址、用户名、密码、备注 |
+| `note` — 安全笔记 | 名称、内容 |
+| `card` — 银行卡 | 名称、持卡人、卡号、有效期、CVV、备注 |
+| `identity` — 身份信息 | 名称、姓名、邮箱、电话、地址、备注 |
 
-### 后端服务（`backend/`）
+### Chrome 扩展（`front/`，v1.1）
+
+| 能力 | 说明 |
+|------|------|
+| 2FA | 二维码图片 / `otpauth://` 导入、验证码复制、30 秒倒计时 |
+| 密码库 | 分类筛选（全部 / 2FA / 密码 / 其他）、一键复制 |
+| 本地备份 | 导出 / 导入 `data.json` |
+| 服务器同步 | 连接检测、手动备份 / 合并、自动同步 |
+| 后台巡检 | 打开扩展时检测连接，Service Worker 每 **10 分钟** 巡检 |
+
+### Android 客户端（`android/`，v1.0.0）
+
+| 能力 | 说明 |
+|------|------|
+| 密码库 | 与扩展相同的五种记录类型，Material 3 + Jetpack Compose |
+| 2FA | TOTP 生成与倒计时；相机扫码 / 相册识别 `otpauth` 二维码 |
+| 用户中心 | 服务器地址、API Key、自动同步、连接测试 |
+| 数据管理 | 备份到服务器 / 从服务器合并 / 导出 JSON（系统分享） |
+| 本地存储 | DataStore Preferences |
+
+### 后端服务（`install.sh` 安装）
 
 - REST API 读写 `data.json` 备份
-- API Key 鉴权
-- 访问日志、CORS 支持
-- 一键安装脚本，支持从 Git 拉取 zip 解压部署
+- API Key 鉴权、访问日志、CORS 支持
+- 按系统自动下载 Release 二进制，首次运行生成配置并启动
 
 ## 项目结构
 
 ```
-2fa/
-├── front/                 # Chrome 扩展
-├── android/               # Android 客户端（Kotlin + Compose）
-├── backend/               # Go 后端
+.
+├── front/              # Chrome 扩展
+│   ├── manifest.json
+│   ├── popup.html / popup.js
+│   ├── background.js / connection.js
+│   ├── jsQR.min.js     # 二维码解析
+│   └── icons/
+├── android/            # Android 客户端（Kotlin + Compose）
+│   ├── app/src/main/java/com/passkey/vault/
+│   └── README.md       # Android 详细说明
+├── install.sh          # 后端一键安装脚本
 └── README.md
 ```
 
 ## 快速开始
 
-### 1. 安装浏览器扩展
+### 1. 安装 Chrome 扩展
 
-1. 打开 Chrome：`chrome://extensions/`
-2. 开启「开发者模式」
-3. 点击「加载已解压的扩展程序」，选择 `front/` 目录
-4. 修改代码后点击扩展卡片上的刷新按钮重新加载
+1. 打开 `chrome://extensions/`
+2. 开启右上角 **开发者模式**
+3. 点击 **加载已解压的扩展程序**，选择 `front/` 目录
+4. 安装完成后，点击工具栏图标打开密码库
 
 ### 2. 安装后端服务
 
-**环境要求**：`openssl`、`curl` 或 `wget`
+**环境要求**：`openssl`，以及 `curl` 或 `wget` 之一
 
-#### 一键安装（下载 Release 二进制）
+#### 方式 A：使用本目录脚本（推荐）
+
+```bash
+bash install.sh
+```
+
+#### 方式 B：远程一键安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AlbertChenshiqi/pass-key-manage/master/install.sh | bash
 ```
 
-脚本会根据系统自动下载对应二进制：
+脚本会根据系统自动下载 Release 二进制：
 
 | 系统 | 二进制 |
 |------|--------|
@@ -62,7 +112,7 @@ curl -fsSL https://raw.githubusercontent.com/AlbertChenshiqi/pass-key-manage/mas
 | Linux ARM64 | `server-linux-arm64` |
 | Windows x64 | `server-windows-amd64.exe` |
 
-**install.sh 环境变量**
+**可配置环境变量：**
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -75,32 +125,68 @@ curl -fsSL https://raw.githubusercontent.com/AlbertChenshiqi/pass-key-manage/mas
 # 指定版本
 RELEASE_VERSION=1.0.0 bash install.sh
 
-# 强制更新二进制
+# 强制更新二进制（保留 data / .env / logs）
 FORCE_UPDATE=1 bash install.sh
 ```
 
-首次运行会自动生成 `.env`（含 API Key）并启动服务，默认端口 `25100`。
+首次运行会自动：
 
-安装完成后查看 `.env` 中的 `API Key`，填入扩展「用户中心 → 服务器管理」。
+1. 在 `~/2fa-backend/`（或 `INSTALL_DIR` 指定目录）生成 `.env` 与 API Key
+2. 初始化 `data/data.json`
+3. 启动服务，默认端口 **25100**
 
-### 3. Android 客户端
+安装完成后，查看安装目录下 `.env` 中的 `API_KEY`，填入各客户端。
+
+**日志位置**（均在安装目录内）：
+
+| 文件 | 说明 |
+|------|------|
+| `logs/server.log` | 服务运行日志 |
+| `logs/access.log` | HTTP 接口访问日志 |
+| `logs/install.log` | 安装脚本日志 |
+
+### 3. 构建 Android 客户端
+
+**环境要求**：
+
+- Android Studio Hedgehog (2023.1.1) 或更高
+- JDK 17
+- Android SDK 34（minSdk 26）
+
+**推荐方式**：用 Android Studio 打开 `android/` 目录，连接设备或模拟器后点击 Run。
+
+也可在终端构建（需本机已安装 Gradle，或在 Android Studio 中生成 Gradle Wrapper）：
 
 ```bash
 cd android
-# 用 Android Studio 打开 android/ 目录，或：
-./gradlew assembleDebug
+gradle assembleDebug
+# APK 输出：app/build/outputs/apk/debug/app-debug.apk
 ```
 
-详见 [android/README.md](android/README.md)。
+更多细节见 [android/README.md](android/README.md)。
 
-### 4. 连接扩展与服务器
+### 4. 连接客户端与服务器
 
-1. 打开扩展 → **用户中心**
-2. 在 **服务器管理** 中填写：
-   - 服务器地址，例如 `http://192.168.x.x:25100`
-   - API Key（与后端 `.env` 中一致）
+1. 打开扩展或 Android 应用 → **用户中心**
+2. 填写：
+   - **服务器地址**，例如 `http://192.168.x.x:25100`（须以 `http://` 或 `https://` 开头）
+   - **API Key**（与后端 `.env` 中一致）
 3. 保存配置，确认连接状态为「连接正常」
 4. 可选：开启 **自动同步**
+
+## 同步策略
+
+各客户端行为一致：
+
+| 操作 | 行为 |
+|------|------|
+| 从服务器同步（手动） | 拉取服务器数据，与本地 **合并**（保留本地独有记录） |
+| 自动同步 · 打开客户端 | 同上，静默合并 |
+| 自动同步 · 增删改 | 静默上传本地全部数据到服务器 |
+| 备份到服务器（手动） | 上传本地全部数据，**覆盖**服务器 |
+| 导入本地备份（Chrome） | **覆盖**本地数据 |
+
+同 ID 冲突时，比较 `updatedAt`（无则用 `createdAt`），保留较新版本。
 
 ## 后端 API
 
@@ -118,7 +204,7 @@ X-API-Key: <API_KEY>
 | GET | `/api/2fa/accounts` | 获取全部数据 |
 | PUT / POST | `/api/2fa/accounts` | 上传 / 覆盖备份 |
 
-**数据格式示例**
+**数据格式示例：**
 
 ```json
 {
@@ -146,9 +232,9 @@ X-API-Key: <API_KEY>
 }
 ```
 
-记录类型 `type`：`totp` | `login` | `note` | `card` | `identity`
+## 后端配置
 
-## 后端配置（`.env`）
+安装目录下的 `.env` 示例：
 
 ```env
 PORT=25100
@@ -157,54 +243,41 @@ DATA_FILE=./data/data.json
 ACCESS_LOG_FILE=./logs/access.log
 ```
 
-日志位置：
+修改配置后，重新运行 `install.sh` 即可启动（若服务已在运行则跳过）。
 
-- 运行日志：`logs/server.log`
-- 接口日志：`logs/access.log`
-- 安装日志：`logs/install.log`
+## 常见问题
 
-## 打包发布
+**扩展 / Android 显示「连接失败」**
 
-在 `backend/` 目录交叉编译各平台二进制并上传至 GitHub Release：
+- 确认服务器地址格式正确，且设备可访问该地址（局域网场景用内网 IP，不要用 `127.0.0.1` 跨设备访问）
+- 检查 API Key 是否与 `.env` 一致
+- 查看 `logs/server.log` 确认服务是否正常运行
 
-```bash
-cd backend
-bash package.sh 1.0.0
-# 输出各平台二进制到 dist/stage/bin/
-```
+**数据存在哪里？**
 
-Release 需包含以下文件及 `install.sh`：
+| 位置 | 存储方式 |
+|------|----------|
+| Chrome 扩展 | `chrome.storage.local` + `localStorage` |
+| Android | DataStore Preferences |
+| 后端 | `~/2fa-backend/data/data.json` |
 
-- `server-darwin-amd64`
-- `server-darwin-arm64`
-- `server-linux-amd64`
-- `server-linux-arm64`
-- `server-windows-amd64.exe`
+**如何跨设备迁移？**
 
-## 开发与编译
+1. 配置同一后端，在目标设备 **从服务器同步**；或
+2. 在 Chrome 扩展中 **导出** `data.json`，在新设备 **导入**（Android 可通过服务器同步间接迁移）
 
-```bash
-# 后端
-cd backend
-go mod tidy
-go build -o bin/server .
+**Android 与 Chrome 功能差异？**
 
-# 手动启动
-source .env
-./bin/server
-```
+| 功能 | Chrome | Android |
+|------|--------|---------|
+| 二维码导入 2FA | ✅ | ✅ |
+| 文件导入备份 | ✅ | ❌ |
+| 导出 JSON | 下载文件 | 系统分享 |
+| 后台连接巡检 | 每 10 分钟 | 打开应用时检测 |
 
-## 同步说明
+## 安全说明
 
-| 操作 | 行为 |
-|------|------|
-| 从服务器同步（手动） | 拉取服务器数据，与本地 **合并**（保留本地独有记录） |
-| 自动同步 · 打开插件 | 同上，静默合并 |
-| 自动同步 · 增删改 | 静默上传本地全部数据到服务器 |
-| 备份到服务器（手动） | 上传本地全部数据，**覆盖**服务器 |
-| 导入本地备份 | **覆盖**本地数据 |
-
-同 ID 冲突时，比较 `updatedAt`（无则用 `createdAt`），保留较新版本。
+本项目为轻量自用方案，**数据以明文 JSON 存储**（本地与服务器均未加密）。请勿在公网暴露后端端口；建议仅在内网或 VPN 环境下使用，并妥善保管 API Key。
 
 ## 许可证
 

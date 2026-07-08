@@ -338,12 +338,29 @@ async function populateUserSettingsForm() {
     if (serverInput) serverInput.value = userSettings.serverUrl || '';
     if (apiKeyInput) apiKeyInput.value = userSettings.apiKey || '';
     if (autoSyncInput) autoSyncInput.checked = !!userSettings.autoSync;
+    updateAutoSyncSectionVisibility();
 
     connectionStatus = await loadConnectionStatus();
     if (connectionStatus && !isStatusForSettings(connectionStatus, userSettings)) {
         connectionStatus = null;
     }
     applyConnectionStatus(connectionStatus);
+}
+
+function updateAutoSyncSectionVisibility() {
+    const serverUrl = normalizeServerUrl(document.getElementById('serverUrlInput')?.value);
+    const autoSyncInput = document.getElementById('autoSyncInput');
+    const section = document.getElementById('autoSyncSection');
+    const hint = document.getElementById('autoSyncHint');
+    const canConfigureSync = !!serverUrl;
+
+    section?.classList.toggle('hidden', !canConfigureSync);
+
+    if (!canConfigureSync && autoSyncInput) {
+        autoSyncInput.checked = false;
+    }
+
+    hint?.classList.toggle('hidden', !autoSyncInput?.checked);
 }
 
 async function checkConnectionOnOpen() {
@@ -1416,6 +1433,8 @@ function bindEvents() {
     document.getElementById('testConnectionBtn')?.addEventListener('click', testServerConnection);
     document.getElementById('syncToServerBtn')?.addEventListener('click', syncToServer);
     document.getElementById('syncFromServerBtn')?.addEventListener('click', syncFromServer);
+    document.getElementById('serverUrlInput')?.addEventListener('input', updateAutoSyncSectionVisibility);
+    document.getElementById('autoSyncInput')?.addEventListener('change', updateAutoSyncSectionVisibility);
 
     document.getElementById('toggleApiKeyBtn')?.addEventListener('click', () => {
         const input = document.getElementById('apiKeyInput');
